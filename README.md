@@ -1,12 +1,31 @@
 ## discordbot
 
-Discord bot for the Daybid connectome memory service.
-
-Currently this package holds only `ConnectomeClient`, a minimal async HTTP
-client that talks to the Go backend's `/api/connectome` routes directly
-(`httpx`, no MCP dependency). The bot itself (Discord library wiring, slash
-commands, token config) is not built yet - see [issue
+Discord bot for the Daybid connectome memory service, built on
+[discord.py](https://discordpy.readthedocs.io/). It talks to the Go backend
+via `ConnectomeClient`, a minimal async HTTP client that hits the backend's
+`/api/connectome` routes directly (`httpx`, no MCP dependency) - see [issue
 #41](https://github.com/dfavelava/DaybidDev/issues/41).
+
+### Identity
+
+Each Discord user is mapped to a Connectome entity id deterministically:
+`discord-<user_id>` (see `discord_entity_id` in
+[`identity.py`](src/discordbot/identity.py)). There's no entity-lookup tool
+yet (Phase 2), so a deterministic id needs no separate lookup step.
+
+### Commands
+
+- `/remember <content>` - stores `content` as a memory attributed to the
+  calling user's entity id.
+
+### Run the bot
+
+```bash
+uv sync
+uv run discordbot
+```
+
+Requires `DISCORD_BOT_TOKEN` (see below) and a reachable Connectome backend.
 
 ### Why a standalone HTTP client instead of reusing `daybidmcp.server`
 
@@ -29,12 +48,20 @@ cp .env.example .env
 ```dotenv
 CONNECTOME_API_BASE_URL=http://localhost:8080/api/connectome
 CONNECTOME_API_KEY=your-api-key
+DISCORD_BOT_TOKEN=your-discord-bot-token
+DISCORD_GUILD_ID=
 ```
 
 Set `CONNECTOME_API_KEY` to the same value as `apikey` in `backend/.env`.
 `ConnectomeClient` also falls back to `DAYBID_API_KEY` or `apikey` if
 `CONNECTOME_API_KEY` isn't set, so it can share an env file with `daybidMCP`
 in local dev.
+
+`DISCORD_BOT_TOKEN` comes from your bot's application in the [Discord
+Developer Portal](https://discord.com/developers/applications). Set
+`DISCORD_GUILD_ID` to a test server's id to sync slash commands there
+instantly during development; leave it unset in production so commands sync
+globally (which can take up to an hour to propagate).
 
 ### Run the tests
 

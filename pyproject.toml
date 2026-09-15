@@ -8,10 +8,14 @@ authors = [
 ]
 requires-python = ">=3.13"
 dependencies = [
+    "discord-py>=2.4.0",
     "httpx>=0.28.1",
     "python-dotenv>=1.1.1",
     "pyyaml>=6.0.2",
 ]
+
+[project.scripts]
+discordbot = "discordbot.bot:main"
 
 [build-system]
 requires = ["uv_build>=0.12.5,<0.13.0"]
