@@ -11,6 +11,7 @@ from discordbot.bot import (
     handle_play_character,
     handle_relationship_claim,
     handle_remember,
+    handle_retire_character,
 )
 from discordbot.connectome_client import Relationship
 from discordbot.identity import character_entity_id, discord_entity_id
@@ -303,6 +304,18 @@ async def test_handle_play_character_refuses_when_character_does_not_exist():
     assert "don't own" in message
 
 
+async def test_handle_play_character_refuses_when_character_is_retired():
+    connectome = FakeConnectomeClient(
+        entities={"thorin": {"meta": {"owner": "discord-123456", "status": "retired"}}}
+    )
+    current_characters = CurrentCharacterStore()
+
+    message = await handle_play_character(connectome, current_characters, user_id=123456, pc_name="Thorin")
+
+    assert connectome.remember_calls == []
+    assert "retired" in message
+
+
 async def test_handle_play_character_is_a_no_op_when_already_current():
     connectome = FakeConnectomeClient(entities={"thorin": {"meta": {"owner": "discord-123456"}}})
     current_characters = CurrentCharacterStore()
@@ -338,6 +351,118 @@ async def test_handle_play_character_supersedes_the_prior_current_character():
     ]
     assert current_characters.get("discord-123456") == ("balin", "mem_test_1.md")
     assert message == "You are now playing Balin."
+
+
+async def test_handle_retire_character_marks_owned_character_retired():
+    connectome = FakeConnectomeClient(entities={"thorin": {"meta": {"owner": "discord-123456"}}})
+    current_characters = CurrentCharacterStore()
+
+    message = await handle_retire_character(connectome, current_characters, user_id=123456, pc_name="Thorin")
+
+    assert connectome.assert_relationship_calls == [
+        {
+            "subject_entity_id": "thorin",
+            "predicate": "retired",
+            "object_entity_id": None,
+            "kind": None,
+            "subject_kind": None,
+            "subject_meta": {"status": "retired"},
+        }
+    ]
+    assert message == "Thorin has been retired."
+
+
+async def test_handle_retire_character_refuses_when_caller_does_not_own_character():
+    connectome = FakeConnectomeClient(entities={"thorin": {"meta": {"owner": "discord-999"}}})
+    current_characters = CurrentCharacterStore()
+
+    message = await handle_retire_character(connectome, current_characters, user_id=123456, pc_name="Thorin")
+
+    assert connectome.assert_relationship_calls == []
+    assert "don't own" in message
+
+
+async def test_handle_retire_character_refuses_when_character_does_not_exist():
+    connectome = FakeConnectomeClient()
+    current_characters = CurrentCharacterStore()
+
+    message = await handle_retire_character(connectome, current_characters, user_id=123456, pc_name="Thorin")
+
+    assert connectome.assert_relationship_calls == []
+    assert "don't own" in message
+
+
+async def test_handle_retire_character_is_a_no_op_when_already_retired():
+    connectome = FakeConnectomeClient(
+        entities={"thorin": {"meta": {"owner": "discord-123456", "status": "retired"}}}
+    )
+    current_characters = CurrentCharacterStore()
+
+    message = await handle_retire_character(connectome, current_characters, user_id=123456, pc_name="Thorin")
+
+    assert connectome.assert_relationship_calls == []
+    assert connectome.remember_calls == []
+    assert message == "Thorin is already retired."
+
+
+async def test_handle_retire_character_leaves_other_owned_characters_untouched():
+    connectome = FakeConnectomeClient(
+        entities={
+            "thorin": {"meta": {"owner": "discord-123456"}},
+            "balin": {"meta": {"owner": "discord-123456"}},
+        }
+    )
+    current_characters = CurrentCharacterStore()
+
+    _ = await handle_retire_character(connectome, current_characters, user_id=123456, pc_name="Thorin")
+
+    assert connectome.entities["balin"] == {"meta": {"owner": "discord-123456"}}
+
+
+async def test_handle_retire_character_clears_current_character_when_retiring_it():
+    connectome = FakeConnectomeClient(entities={"thorin": {"meta": {"owner": "discord-123456"}}})
+    current_characters = CurrentCharacterStore()
+    current_characters.set("discord-123456", "thorin", "mem_thorin.md")
+
+    message = await handle_retire_character(connectome, current_characters, user_id=123456, pc_name="Thorin")
+
+    assert connectome.remember_calls[0]["relationships"] == [
+        {
+            "subjectEntityId": "discord-123456",
+            "predicate": "plays",
+            "objectEntityId": None,
+            "kind": "fact",
+        }
+    ]
+    assert connectome.supersede_relationship_calls == [
+        {
+            "key": "mem_thorin.md",
+            "subject_entity_id": "discord-123456",
+            "predicate": "plays",
+            "object_entity_id": "thorin",
+            "superseded_by": "mem_test_1.md",
+        }
+    ]
+    assert current_characters.get("discord-123456") == (None, "mem_test_1.md")
+    assert message == "Thorin has been retired."
+
+
+async def test_handle_retire_character_leaves_current_character_untouched_when_retiring_a_different_one():
+    connectome = FakeConnectomeClient(
+        entities={
+            "thorin": {"meta": {"owner": "discord-123456"}},
+            "balin": {"meta": {"owner": "discord-123456"}},
+        }
+    )
+    current_characters = CurrentCharacterStore()
+    current_characters.set("discord-123456", "balin", "mem_balin.md")
+
+    message = await handle_retire_character(connectome, current_characters, user_id=123456, pc_name="Thorin")
+
+    assert connectome.remember_calls == []
+    assert connectome.supersede_relationship_calls == []
+    assert current_characters.get("discord-123456") == ("balin", "mem_balin.md")
+    assert message == "Thorin has been retired."
 
 
 def test_get_gm_user_ids_parses_comma_separated_list(monkeypatch):
@@ -447,6 +572,15 @@ def test_create_bot_registers_play_character_command():
 
     assert command is not None
     assert command.name == "play-character"
+
+
+def test_create_bot_registers_retire_character_command():
+    bot = create_bot()
+
+    command = bot.tree.get_command("retire-character")
+
+    assert command is not None
+    assert command.name == "retire-character"
 
 
 def test_character_entity_id_is_slugified_and_deterministic():

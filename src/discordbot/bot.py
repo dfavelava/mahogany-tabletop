@@ -12,6 +12,11 @@ CHARACTER_KIND = "character"
 CHARACTERS_GROUP_SUFFIX = "-characters"
 MEMBER_OF_PREDICATE = "member_of"
 PLAYS_PREDICATE = "plays"
+# No object entity - like the "is_tired" pattern, this predicate exists purely
+# to drive a subject_meta-only assert_relationship call (see
+# handle_retire_character).
+RETIRED_PREDICATE = "retired"
+RETIRED_STATUS = "retired"
 
 _ = load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
@@ -164,13 +169,18 @@ class CurrentCharacterStore:
     """
 
     def __init__(self) -> None:
-        self._current: dict[str, tuple[str, str]] = {}
+        self._current: dict[str, tuple[str | None, str]] = {}
 
-    def get(self, player_id: str) -> tuple[str, str] | None:
-        """Return (character_id, memory_key) for the player's current character, if any."""
+    def get(self, player_id: str) -> tuple[str | None, str] | None:
+        """Return (character_id, memory_key) for the player's current character, if any.
+
+        character_id is None when the player's current "plays" relationship
+        points at no character (see handle_retire_character) - the memory_key
+        is still tracked so a later command has something to supersede.
+        """
         return self._current.get(player_id)
 
-    def set(self, player_id: str, character_id: str, memory_key: str) -> None:
+    def set(self, player_id: str, character_id: str | None, memory_key: str) -> None:
         self._current[player_id] = (character_id, memory_key)
 
 
@@ -183,8 +193,10 @@ async def handle_play_character(
     """Set the caller's current active character, superseding any prior one.
 
     Refuses if the caller doesn't own the named character (created via
-    /add-character, #45). Re-running this for the character that's already
-    current is a harmless no-op, matching /add-character and /join-party.
+    /add-character, #45), or if it's retired (#55) - a retired character is no
+    longer selectable as current going forward. Re-running this for the
+    character that's already current is a harmless no-op, matching
+    /add-character and /join-party.
     """
     player_id = discord_entity_id(user_id)
     character_id = character_entity_id(pc_name)
@@ -194,6 +206,9 @@ async def handle_play_character(
     owner = meta.get("owner") if isinstance(meta, dict) else None
     if owner != player_id:
         return f'You don\'t own a character named "{pc_name}". Create it first with /add-character.'
+
+    if isinstance(meta, dict) and meta.get("status") == RETIRED_STATUS:
+        return f"{pc_name} has been retired and can't be set as your current character."
 
     previous = current_characters.get(player_id)
     if previous is not None and previous[0] == character_id:
@@ -225,6 +240,75 @@ async def handle_play_character(
 
     current_characters.set(player_id, character_id, new_memory_key)
     return f"You are now playing {pc_name}."
+
+
+async def handle_retire_character(
+    connectome: ConnectomeClient,
+    current_characters: CurrentCharacterStore,
+    user_id: int,
+    pc_name: str,
+) -> str:
+    """Mark the caller's character retired, clearing it as their current character if it was one.
+
+    Refuses if the caller doesn't own the named character. Retirement is
+    independent of "current" (#54): a player can retire a PC without a
+    successor lined up, so this never sets a new current character - it only
+    clears the old one if the retired PC was it. Re-running this on an
+    already-retired character is a harmless no-op, matching /add-character,
+    /join-party, and /play-character.
+
+    Design decision (#55): clearing "current" means writing a new "plays"
+    memory whose object is None (the player currently plays nothing) and
+    superseding the retired character's prior "plays" memory with it - not
+    leaving that memory un-superseded and stale. Superseding to an inert
+    "plays nothing" fact, rather than to nothing at all, keeps the invariant
+    that at most one of a player's "plays" memories is ever un-superseded: the
+    next /play-character call has this new memory to supersede in turn.
+    """
+    player_id = discord_entity_id(user_id)
+    character_id = character_entity_id(pc_name)
+
+    character = await connectome.get_entity(character_id)
+    meta = character.get("meta") if character else None
+    owner = meta.get("owner") if isinstance(meta, dict) else None
+    if owner != player_id:
+        return f'You don\'t own a character named "{pc_name}". Create it first with /add-character.'
+
+    if isinstance(meta, dict) and meta.get("status") == RETIRED_STATUS:
+        return f"{pc_name} is already retired."
+
+    _ = await connectome.assert_relationship(
+        character_id,
+        RETIRED_PREDICATE,
+        subject_meta={"status": RETIRED_STATUS},
+    )
+
+    previous = current_characters.get(player_id)
+    if previous is not None and previous[0] == character_id:
+        previous_memory_key = previous[1]
+        result = await connectome.remember(
+            f"{player_id} has no current character.",
+            entities=[player_id],
+            relationships=[
+                {
+                    "subjectEntityId": player_id,
+                    "predicate": PLAYS_PREDICATE,
+                    "objectEntityId": None,
+                    "kind": "fact",
+                }
+            ],
+        )
+        new_memory_key = result["key"]
+        _ = await connectome.supersede_relationship(
+            previous_memory_key,
+            player_id,
+            PLAYS_PREDICATE,
+            character_id,
+            superseded_by=new_memory_key,
+        )
+        current_characters.set(player_id, None, new_memory_key)
+
+    return f"{pc_name} has been retired."
 
 
 async def assign_gm_relationships(connectome: ConnectomeClient, user_ids: list[int]) -> None:
@@ -323,6 +407,12 @@ def create_bot() -> DaybidDiscordBot:
     @app_commands.describe(pc_name="The character's name")
     async def play_character(interaction: discord.Interaction, pc_name: str) -> None:
         message = await handle_play_character(bot.connectome, bot.current_characters, interaction.user.id, pc_name)
+        await interaction.response.send_message(message, ephemeral=True)
+
+    @bot.tree.command(name="retire-character", description="Retire a character you own.")
+    @app_commands.describe(pc_name="The character's name")
+    async def retire_character(interaction: discord.Interaction, pc_name: str) -> None:
+        message = await handle_retire_character(bot.connectome, bot.current_characters, interaction.user.id, pc_name)
         await interaction.response.send_message(message, ephemeral=True)
 
     return bot
