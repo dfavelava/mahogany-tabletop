@@ -6,6 +6,7 @@ from discordbot.bot import (
     handle_add_character,
     handle_gm_note,
     handle_join_party,
+    handle_log,
     handle_relationship_claim,
     handle_remember,
 )
@@ -22,12 +23,19 @@ class FakeConnectomeClient:
     async def remember(
         self,
         content: str,
+        memory_type: str = "note",
         entities: list[str] | None = None,
         relationships: list[Relationship] | None = None,
         acl: list[str] | None = None,
     ) -> dict[str, str]:
         self.remember_calls.append(
-            {"content": content, "entities": entities, "relationships": relationships, "acl": acl}
+            {
+                "content": content,
+                "memory_type": memory_type,
+                "entities": entities,
+                "relationships": relationships,
+                "acl": acl,
+            }
         )
         return {"key": "mem_test.md"}
 
@@ -74,6 +82,7 @@ async def test_handle_remember_stores_memory_under_deterministic_entity_id():
     assert connectome.remember_calls == [
         {
             "content": "David prefers tea over coffee.",
+            "memory_type": "note",
             "entities": ["discord-123456"],
             "relationships": None,
             "acl": None,
@@ -97,6 +106,7 @@ async def test_handle_relationship_claim_records_memory_and_asserts_relationship
     assert connectome.remember_calls == [
         {
             "content": "David likes tea.",
+            "memory_type": "note",
             "entities": ["discord-123456", "tea"],
             "relationships": [
                 {
@@ -169,12 +179,30 @@ async def test_handle_gm_note_scopes_memory_to_gm_group():
     assert connectome.remember_calls == [
         {
             "content": "The BBEG's real name is Vecna.",
+            "memory_type": "note",
             "entities": None,
             "relationships": None,
             "acl": [GM_GROUP_ID],
         }
     ]
     assert "The BBEG's real name is Vecna." in message
+
+
+async def test_handle_log_stores_content_as_an_event_memory():
+    connectome = FakeConnectomeClient()
+
+    message = await handle_log(connectome, "The party enters the ruined keep.")
+
+    assert connectome.remember_calls == [
+        {
+            "content": "The party enters the ruined keep.",
+            "memory_type": "event",
+            "entities": None,
+            "relationships": None,
+            "acl": None,
+        }
+    ]
+    assert "The party enters the ruined keep." in message
 
 
 async def test_handle_join_party_asserts_relationship_for_owned_character():
@@ -302,6 +330,15 @@ def test_create_bot_registers_gm_note_command():
 
     assert command is not None
     assert command.name == "gm-note"
+
+
+def test_create_bot_registers_log_command():
+    bot = create_bot()
+
+    command = bot.tree.get_command("log")
+
+    assert command is not None
+    assert command.name == "log"
 
 
 def test_character_entity_id_is_slugified_and_deterministic():

@@ -86,6 +86,19 @@ async def handle_gm_note(connectome: ConnectomeClient, content: str) -> str:
     return f"Noted (GM only): {content}"
 
 
+async def handle_log(connectome: ConnectomeClient, content: str) -> str:
+    """Store raw session narration as a memory and return a confirmation.
+
+    Uses the generic "event" MemoryType rather than adding a session_log type
+    to daybidmcp.server/ConnectomeClient's MemoryType vocabulary - Connectome
+    stays agnostic of caller-specific concepts like session narration (see
+    west-marches-overlay preference from #32). acl is omitted so the
+    backend's configured DEFAULT_ACL applies, same as /remember.
+    """
+    _ = await connectome.remember(content, memory_type="event")
+    return f"Logged: {content}"
+
+
 async def handle_add_character(connectome: ConnectomeClient, user_id: int, pc_name: str) -> str:
     """Resolve-or-create a PC entity and assign it to the calling Discord user.
 
@@ -209,6 +222,12 @@ def create_bot() -> DaybidDiscordBot:
     @app_commands.describe(content="What to note")
     async def gm_note(interaction: discord.Interaction, content: str) -> None:
         message = await handle_gm_note(bot.connectome, content)
+        await interaction.response.send_message(message, ephemeral=True)
+
+    @bot.tree.command(name="log", description="Log freeform session narration to Connectome.")
+    @app_commands.describe(content="The narration text to log")
+    async def log(interaction: discord.Interaction, content: str) -> None:
+        message = await handle_log(bot.connectome, content)
         await interaction.response.send_message(message, ephemeral=True)
 
     @bot.tree.command(name="add-character", description="Create a character and claim ownership of it.")
