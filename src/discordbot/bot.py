@@ -5,7 +5,7 @@ import discord
 from discord import app_commands
 from dotenv import load_dotenv
 
-from .connectome_client import ConnectomeClient
+from .connectome_client import ConnectomeClient, RelationshipKind
 from .identity import character_entity_id, discord_entity_id
 
 CHARACTER_KIND = "character"
@@ -42,6 +42,48 @@ async def handle_remember(connectome: ConnectomeClient, user_id: int, content: s
     entity_id = discord_entity_id(user_id)
     _ = await connectome.remember(content, entities=[entity_id])
     return f"Remembered: {content}"
+
+
+async def handle_relationship_claim(
+    connectome: ConnectomeClient,
+    content: str,
+    subject_entity_id: str,
+    predicate: str,
+    object_entity_id: str,
+    kind: RelationshipKind,
+) -> str:
+    """Record a memory carrying a subject-predicate-object relationship claim.
+
+    Shared by /fact and /rumor, which differ only in kind. Lists subject/object
+    in the memory's entities too, mirroring how daybidmcp.server.remember's
+    stub_entities_for_relationships folds relationship endpoints into a
+    memory's entities field - otherwise recall's entity filter, which reads
+    only that field, couldn't find this memory by subject or object id. Also
+    asserts the relationship via the shared entity-relationship endpoint so
+    subject/object get stub ent_*.json records the same way
+    daybidmcp.server.remember does today (see #51, #43).
+    """
+    entities = [subject_entity_id] if subject_entity_id == object_entity_id else [subject_entity_id, object_entity_id]
+    _ = await connectome.remember(
+        content,
+        entities=entities,
+        relationships=[
+            {
+                "subjectEntityId": subject_entity_id,
+                "predicate": predicate,
+                "objectEntityId": object_entity_id,
+                "kind": kind,
+            }
+        ],
+    )
+    _ = await connectome.assert_relationship(subject_entity_id, predicate, object_entity_id, kind=kind)
+    return f"Recorded {kind}: {subject_entity_id} {predicate} {object_entity_id}."
+
+
+async def handle_gm_note(connectome: ConnectomeClient, content: str) -> str:
+    """Store content as a GM-only memory and return a confirmation."""
+    _ = await connectome.remember(content, acl=[GM_GROUP_ID])
+    return f"Noted (GM only): {content}"
 
 
 async def handle_add_character(connectome: ConnectomeClient, user_id: int, pc_name: str) -> str:
@@ -133,6 +175,40 @@ def create_bot() -> DaybidDiscordBot:
     @app_commands.describe(content="What to remember")
     async def remember(interaction: discord.Interaction, content: str) -> None:
         message = await handle_remember(bot.connectome, interaction.user.id, content)
+        await interaction.response.send_message(message, ephemeral=True)
+
+    @bot.tree.command(name="fact", description="Record a fact relationship between two entities.")
+    @app_commands.describe(
+        subject="The subject entity id",
+        predicate="The relationship connecting subject to object, e.g. 'likes' or 'member_of'",
+        object_entity_id="The object entity id",
+        content="The memory content describing this fact",
+    )
+    @app_commands.rename(object_entity_id="object")
+    async def fact(
+        interaction: discord.Interaction, subject: str, predicate: str, object_entity_id: str, content: str
+    ) -> None:
+        message = await handle_relationship_claim(bot.connectome, content, subject, predicate, object_entity_id, "fact")
+        await interaction.response.send_message(message, ephemeral=True)
+
+    @bot.tree.command(name="rumor", description="Record a rumored (unverified) relationship between two entities.")
+    @app_commands.describe(
+        subject="The subject entity id",
+        predicate="The relationship connecting subject to object, e.g. 'likes' or 'member_of'",
+        object_entity_id="The object entity id",
+        content="The memory content describing this rumor",
+    )
+    @app_commands.rename(object_entity_id="object")
+    async def rumor(
+        interaction: discord.Interaction, subject: str, predicate: str, object_entity_id: str, content: str
+    ) -> None:
+        message = await handle_relationship_claim(bot.connectome, content, subject, predicate, object_entity_id, "rumor")
+        await interaction.response.send_message(message, ephemeral=True)
+
+    @bot.tree.command(name="gm-note", description="Save a GM-only memory to Connectome.")
+    @app_commands.describe(content="What to note")
+    async def gm_note(interaction: discord.Interaction, content: str) -> None:
+        message = await handle_gm_note(bot.connectome, content)
         await interaction.response.send_message(message, ephemeral=True)
 
     @bot.tree.command(name="add-character", description="Create a character and claim ownership of it.")

@@ -89,6 +89,53 @@ async def test_remember_posts_a_valid_memory_document(patch_async_client):
     assert content.strip("\n") == "hello world"
 
 
+async def test_remember_includes_relationships_when_given(patch_async_client):
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["request"] = request
+        return httpx.Response(200, json={"message": "success"})
+
+    set_handler(patch_async_client, handler)
+
+    client = make_client()
+    _ = await client.remember(
+        "David likes tea.",
+        relationships=[
+            {"subjectEntityId": "david", "predicate": "likes", "objectEntityId": "tea", "kind": "fact"}
+        ],
+    )
+
+    body = captured["request"].content.decode("utf-8")
+    document = body.split("\r\n\r\n", 1)[1].rsplit("\r\n--", 1)[0]
+    frontmatter_yaml = document.split("---\n", 2)[1]
+    metadata = yaml.safe_load(frontmatter_yaml)
+
+    assert metadata["relationships"] == [
+        {"subjectEntityId": "david", "predicate": "likes", "objectEntityId": "tea", "kind": "fact"}
+    ]
+
+
+async def test_remember_defaults_relationships_to_empty_list(patch_async_client):
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["request"] = request
+        return httpx.Response(200, json={"message": "success"})
+
+    set_handler(patch_async_client, handler)
+
+    client = make_client()
+    _ = await client.remember("hello world")
+
+    body = captured["request"].content.decode("utf-8")
+    document = body.split("\r\n\r\n", 1)[1].rsplit("\r\n--", 1)[0]
+    frontmatter_yaml = document.split("---\n", 2)[1]
+    metadata = yaml.safe_load(frontmatter_yaml)
+
+    assert metadata["relationships"] == []
+
+
 async def test_remember_includes_acl_when_given(patch_async_client):
     captured = {}
 

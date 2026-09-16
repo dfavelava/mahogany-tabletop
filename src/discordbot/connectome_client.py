@@ -4,7 +4,7 @@ import uuid
 from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
-from typing import Literal, get_args
+from typing import Literal, NotRequired, TypedDict, get_args
 
 import httpx
 import yaml
@@ -18,6 +18,23 @@ MEMORY_SCHEMA_VERSION = "connectome/memory/0.1"
 MemoryType = Literal["note", "fact", "preference", "event"]
 MEMORY_TYPES: tuple[str, ...] = get_args(MemoryType)
 DEFAULT_MEMORY_TYPE: MemoryType = "note"
+
+# Mirrors RelationshipKind/DEFAULT_RELATIONSHIP_KIND in daybidmcp.server: the
+# truth-status of a relationship claim, distinct from MemoryType even though
+# "fact" is a value both happen to share (see #43).
+RelationshipKind = Literal["fact", "hypothesis", "rumor"]
+DEFAULT_RELATIONSHIP_KIND: RelationshipKind = "fact"
+
+
+class Relationship(TypedDict):
+    """A directed relationship between entities, mirroring daybidmcp.server's
+    Relationship model - see format_memory."""
+
+    subjectEntityId: str
+    predicate: str
+    objectEntityId: NotRequired[str | None]
+    kind: NotRequired[RelationshipKind]
+
 
 # Identifies where a memory came from, mirroring daybidmcp.server's
 # MEMORY_SOURCE_TYPE convention for its own client identity.
@@ -90,6 +107,7 @@ class ConnectomeClient:
         content: str,
         memory_type: MemoryType = DEFAULT_MEMORY_TYPE,
         entities: list[str] | None = None,
+        relationships: list[Relationship] | None = None,
         acl: list[str] | None = None,
     ) -> dict[str, str]:
         """Write a memory document and return its key."""
@@ -102,7 +120,7 @@ class ConnectomeClient:
             "created_at": now,
             "source": {"type": MEMORY_SOURCE_TYPE, "created_at": now},
             "entities": list(entities or []),
-            "relationships": [],
+            "relationships": [dict(relationship) for relationship in (relationships or [])],
         }
         if acl is not None:
             metadata["acl"] = acl
