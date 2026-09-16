@@ -10,6 +10,7 @@ from .identity import character_entity_id, discord_entity_id
 
 CHARACTER_KIND = "character"
 CHARACTERS_GROUP_SUFFIX = "-characters"
+MEMBER_OF_PREDICATE = "member_of"
 
 _ = load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
@@ -19,9 +20,21 @@ DISCORD_BOT_TOKEN_ENV = "DISCORD_BOT_TOKEN"
 # global sync. Unset in production so the bot registers commands globally.
 DISCORD_GUILD_ID_ENV = "DISCORD_GUILD_ID"
 
+# Comma-separated Discord user ids to grant GM visibility. Fixed config, not
+# a slash command: nobody should be able to grant themselves GM visibility by
+# typing a command, so this is the only path that asserts it (see #42).
+DISCORD_GM_USER_IDS_ENV = "DISCORD_GM_USER_IDS"
+
+GM_GROUP_ID = "GM"
+
 
 def get_bot_token() -> str | None:
     return os.getenv(DISCORD_BOT_TOKEN_ENV)
+
+
+def get_gm_user_ids() -> list[int]:
+    raw = os.getenv(DISCORD_GM_USER_IDS_ENV, "")
+    return [int(piece.strip()) for piece in raw.split(",") if piece.strip()]
 
 
 async def handle_remember(connectome: ConnectomeClient, user_id: int, content: str) -> str:
@@ -51,12 +64,46 @@ async def handle_add_character(connectome: ConnectomeClient, user_id: int, pc_na
 
     _ = await connectome.assert_relationship(
         character_id,
-        "member_of",
+        MEMBER_OF_PREDICATE,
         f"{player_id}{CHARACTERS_GROUP_SUFFIX}",
         subject_kind=CHARACTER_KIND,
         subject_meta={"owner": player_id},
     )
     return f"{pc_name} is now yours."
+
+
+async def handle_join_party(
+    connectome: ConnectomeClient, user_id: int, character_name: str, party_name: str
+) -> str:
+    """Assert that the caller's character joined a party, refusing if they don't own that character.
+
+    Party member_of lives on the character entity, not the player - a
+    character joins a party, not an account (see #42's design note). Ownership
+    is recorded on the character's entity record by /add-character (#45) as
+    meta.owner; re-running this for a party the character already belongs to
+    is a harmless no-op since the backend's member_of merge dedupes.
+    """
+    caller_id = discord_entity_id(user_id)
+    character_id = character_entity_id(character_name)
+
+    character = await connectome.get_entity(character_id)
+    meta = character.get("meta") if character else None
+    owner = meta.get("owner") if isinstance(meta, dict) else None
+    if owner != caller_id:
+        return f'You don\'t own a character named "{character_name}". Create it first with /add-character.'
+
+    _ = await connectome.assert_relationship(character_id, MEMBER_OF_PREDICATE, party_name)
+    return f"{character_name} joined {party_name}."
+
+
+async def assign_gm_relationships(connectome: ConnectomeClient, user_ids: list[int]) -> None:
+    """Assert a member_of GM relationship for each configured GM user id.
+
+    Called once at startup from DISCORD_GM_USER_IDS rather than exposed as a
+    command - see the module-level note on that env var.
+    """
+    for user_id in user_ids:
+        _ = await connectome.assert_relationship(discord_entity_id(user_id), MEMBER_OF_PREDICATE, GM_GROUP_ID)
 
 
 class DaybidDiscordBot(discord.Client):
@@ -68,6 +115,8 @@ class DaybidDiscordBot(discord.Client):
         self.tree = app_commands.CommandTree(self)
 
     async def setup_hook(self) -> None:
+        await assign_gm_relationships(self.connectome, get_gm_user_ids())
+
         guild_id = os.getenv(DISCORD_GUILD_ID_ENV)
         if guild_id:
             guild = discord.Object(id=int(guild_id))
@@ -90,6 +139,12 @@ def create_bot() -> DaybidDiscordBot:
     @app_commands.describe(pc_name="The character's name")
     async def add_character(interaction: discord.Interaction, pc_name: str) -> None:
         message = await handle_add_character(bot.connectome, interaction.user.id, pc_name)
+        await interaction.response.send_message(message, ephemeral=True)
+
+    @bot.tree.command(name="join-party", description="Join a party with a character you own.")
+    @app_commands.describe(character_name="Your character's name", party_name="The party name to join")
+    async def join_party(interaction: discord.Interaction, character_name: str, party_name: str) -> None:
+        message = await handle_join_party(bot.connectome, interaction.user.id, character_name, party_name)
         await interaction.response.send_message(message, ephemeral=True)
 
     return bot

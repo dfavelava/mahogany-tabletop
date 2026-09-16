@@ -1,4 +1,4 @@
 from .connectome_client import ConnectomeClient
-from .identity import discord_entity_id
+from .identity import character_entity_id, discord_entity_id
 
-__all__ = ["ConnectomeClient", "discord_entity_id"]
+__all__ = ["ConnectomeClient", "character_entity_id", "discord_entity_id"]

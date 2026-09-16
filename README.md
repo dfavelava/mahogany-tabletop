@@ -24,6 +24,23 @@ yet (Phase 2), so a deterministic id needs no separate lookup step.
   owned by a different player; re-running it with a name the caller already
   owns is a no-op (see [issue
   #45](https://github.com/dfavelava/DaybidDev/issues/45)).
+- `/join-party <character_name> <party_name>` - asserts a `member_of`
+  relationship from the character's entity id (`ent_<slugified
+  character_name>.json`) to the party `party_name`, via the backend's
+  `/entity/relationship` endpoint (see [issue
+  #51](https://github.com/dfavelava/DaybidDev/issues/51)). Refuses if the
+  caller's entity id isn't recorded as `meta.owner` on that character (set by
+  `/add-character`, [issue
+  #45](https://github.com/dfavelava/DaybidDev/issues/45)) - a player can't
+  assert party membership for a PC they don't own. Re-running it for a party
+  the character already belongs to is a harmless no-op; `recall`'s `as`
+  scoping reads this membership (one level, no recursion) to decide whether a
+  memory whose `acl` names that party is visible to the character's owner.
+
+GM visibility is fixed config, not a command: set `DISCORD_GM_USER_IDS` (see
+below) to a comma-separated list of Discord user ids, and the bot asserts a
+`member_of: "GM"` relationship directly on each of their player entities once
+on startup. There is no self-service path to grant GM visibility.
 
 ### Run the bot
 
@@ -57,6 +74,7 @@ CONNECTOME_API_BASE_URL=http://localhost:8080/api/connectome
 CONNECTOME_API_KEY=your-api-key
 DISCORD_BOT_TOKEN=your-discord-bot-token
 DISCORD_GUILD_ID=
+DISCORD_GM_USER_IDS=
 ```
 
 Set `CONNECTOME_API_KEY` to the same value as `apikey` in `backend/.env`.
@@ -91,11 +109,11 @@ Covers the routes needed to write and search memory:
 
 - `POST /api/connectome/memory/` (`remember`)
 - `POST /api/connectome/memory/search` (`recall`)
-- `GET /api/connectome/memory/?key=...` (`get_memory`)
+- `GET /api/connectome/memory/?key=...` (`get_memory`, and `get_entity` which
+  parses the JSON body of an `ent_<id>.json` key)
 - `GET /api/connectome/memory/list` (`browse_all`)
 - `DELETE /api/connectome/memory/` (`forget`)
 - `POST /api/connectome/entity/relationship` (`assert_relationship`)
-- `GET /api/connectome/memory/?key=ent_<id>.json` (`get_entity`)
 
 `remember` writes a plain memory document (content + entity ids); it does not
 itself replicate `daybidmcp.server`'s entity-record merge logic. Instead,
