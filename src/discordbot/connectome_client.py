@@ -1,3 +1,4 @@
+import json
 import os
 import uuid
 from datetime import UTC, datetime
@@ -23,6 +24,12 @@ DEFAULT_MEMORY_TYPE: MemoryType = "note"
 MEMORY_SOURCE_TYPE = "discord"
 
 _ = load_dotenv(Path(__file__).resolve().parents[2] / ".env")
+
+
+def entity_key(entity_id: str) -> str:
+    """Blob store key for an entity id, matching the ent_<id>.json convention
+    entityKey uses in backend/resources/entity.go."""
+    return f"ent_{entity_id}.json"
 
 
 class ConnectomeClient:
@@ -146,16 +153,26 @@ class ConnectomeClient:
         predicate: str,
         object_entity_id: str | None = None,
         kind: str | None = None,
+        subject_kind: str | None = None,
+        subject_meta: dict[str, object] | None = None,
     ) -> dict[str, object]:
         """Assert a relationship between two entities via the Go backend's shared
         merge endpoint, so ent_*.json state (stub entities, member_of) ends up the
         same as an equivalent daybidmcp.server.remember call would produce - see
-        UpsertEntityRelationship in backend/resources/entity.go."""
+        UpsertEntityRelationship in backend/resources/entity.go.
+
+        subject_kind/subject_meta optionally stamp the subject entity's
+        kind/meta fields in the same call (overwrite and shallow-merge
+        respectively, mirroring daybidmcp.server's Entity.kind/Entity.meta)."""
         body: dict[str, object] = {"subjectEntityId": subject_entity_id, "predicate": predicate}
         if object_entity_id is not None:
             body["objectEntityId"] = object_entity_id
         if kind is not None:
             body["kind"] = kind
+        if subject_kind is not None:
+            body["subjectKind"] = subject_kind
+        if subject_meta is not None:
+            body["subjectMeta"] = subject_meta
 
         response = await self._request("POST", "/entity/relationship", json_body=body)
         return response.json()
@@ -164,6 +181,18 @@ class ConnectomeClient:
         """Fetch a stored memory document or entity record by key."""
         response = await self._request("GET", "/memory/", params={"key": key})
         return response.json()
+
+    async def get_entity(self, entity_id: str) -> dict[str, object] | None:
+        """Fetch an ent_<id>.json entity record, or None if it doesn't exist yet."""
+        try:
+            payload = await self.get_memory(entity_key(entity_id))
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                return None
+            raise
+        content = payload["content"]
+        assert isinstance(content, str)
+        return json.loads(content)
 
     async def browse_all(self) -> dict[str, object]:
         """List all stored memory and entity keys."""

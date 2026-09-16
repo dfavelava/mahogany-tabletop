@@ -17,6 +17,13 @@ yet (Phase 2), so a deterministic id needs no separate lookup step.
 
 - `/remember <content>` - stores `content` as a memory attributed to the
   calling user's entity id.
+- `/add-character <pc_name>` - resolves or creates a `character`-kind PC
+  entity (`ent_<slugified pc_name>.json`), records the calling user's entity
+  id as `meta.owner`, and adds the character to that player's
+  `<player entity id>-characters` group. Refuses if the name is already
+  owned by a different player; re-running it with a name the caller already
+  owns is a no-op (see [issue
+  #45](https://github.com/dfavelava/DaybidDev/issues/45)).
 
 ### Run the bot
 
@@ -88,12 +95,17 @@ Covers the routes needed to write and search memory:
 - `GET /api/connectome/memory/list` (`browse_all`)
 - `DELETE /api/connectome/memory/` (`forget`)
 - `POST /api/connectome/entity/relationship` (`assert_relationship`)
+- `GET /api/connectome/memory/?key=ent_<id>.json` (`get_entity`)
 
 `remember` writes a plain memory document (content + entity ids); it does not
 itself replicate `daybidmcp.server`'s entity-record merge logic. Instead,
 `assert_relationship` calls the Go backend's shared `/entity/relationship`
 endpoint (see [issue #51](https://github.com/dfavelava/DaybidDev/issues/51)),
-which upserts stub `ent_*.json` records for the subject/object entities and,
-for the `member_of` predicate, merges the object entity id into the subject's
-`member_of` list - the same state `daybidmcp.server.remember` would produce,
-without re-deriving that logic in Python here.
+which upserts stub `ent_*.json` records for the subject/object entities,
+for the `member_of` predicate merges the object entity id into the subject's
+`member_of` list, and - when `subject_kind`/`subject_meta` are given - stamps
+those onto the subject entity (overwrite and shallow-merge respectively) -
+the same state `daybidmcp.server.remember` would produce, without
+re-deriving that logic in Python here. `get_entity` reads an `ent_*.json`
+record back (e.g. to check `meta.owner` before deciding whether to write),
+returning `None` if it doesn't exist yet.

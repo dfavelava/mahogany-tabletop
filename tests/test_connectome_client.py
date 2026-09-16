@@ -181,6 +181,56 @@ async def test_assert_relationship_includes_kind_when_given(patch_async_client):
     assert body["kind"] == "rumor"
 
 
+async def test_assert_relationship_includes_subject_kind_and_meta_when_given(patch_async_client):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"subject": {"id": "thorin"}})
+
+    set_handler(patch_async_client, handler)
+
+    client = make_client()
+    _ = await client.assert_relationship(
+        "thorin",
+        "member_of",
+        "discord-1-characters",
+        subject_kind="character",
+        subject_meta={"owner": "discord-1"},
+    )
+
+    request = last_request(patch_async_client)
+    body = json.loads(request.content)
+    assert body["subjectKind"] == "character"
+    assert body["subjectMeta"] == {"owner": "discord-1"}
+
+
+async def test_get_entity_parses_the_entity_json_content(patch_async_client):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"content": json.dumps({"id": "thorin", "kind": "character", "meta": {"owner": "discord-1"}})},
+        )
+
+    set_handler(patch_async_client, handler)
+
+    client = make_client()
+    entity = await client.get_entity("thorin")
+
+    request = last_request(patch_async_client)
+    assert request.url.params["key"] == "ent_thorin.json"
+    assert entity == {"id": "thorin", "kind": "character", "meta": {"owner": "discord-1"}}
+
+
+async def test_get_entity_returns_none_when_not_found(patch_async_client):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"error": "not found"})
+
+    set_handler(patch_async_client, handler)
+
+    client = make_client()
+    entity = await client.get_entity("thorin")
+
+    assert entity is None
+
+
 async def test_get_memory_sends_key_as_query_param(patch_async_client):
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"content": "..."})

@@ -6,7 +6,10 @@ from discord import app_commands
 from dotenv import load_dotenv
 
 from .connectome_client import ConnectomeClient
-from .identity import discord_entity_id
+from .identity import character_entity_id, discord_entity_id
+
+CHARACTER_KIND = "character"
+CHARACTERS_GROUP_SUFFIX = "-characters"
 
 _ = load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
@@ -26,6 +29,34 @@ async def handle_remember(connectome: ConnectomeClient, user_id: int, content: s
     entity_id = discord_entity_id(user_id)
     _ = await connectome.remember(content, entities=[entity_id])
     return f"Remembered: {content}"
+
+
+async def handle_add_character(connectome: ConnectomeClient, user_id: int, pc_name: str) -> str:
+    """Resolve-or-create a PC entity and assign it to the calling Discord user.
+
+    Refuses if the name is already owned by a different player; re-running
+    with a name the caller already owns is a harmless no-op. The ownership
+    check happens here rather than in the backend, which stays agnostic of
+    what "owner" means - it just persists and merges whatever meta a caller
+    passes (see UpsertEntityRelationship in backend/resources/entity.go).
+    """
+    player_id = discord_entity_id(user_id)
+    character_id = character_entity_id(pc_name)
+
+    existing = await connectome.get_entity(character_id)
+    existing_meta = existing.get("meta") if existing else None
+    existing_owner = existing_meta.get("owner") if isinstance(existing_meta, dict) else None
+    if existing_owner is not None and existing_owner != player_id:
+        return f"{pc_name} is already claimed by another player."
+
+    _ = await connectome.assert_relationship(
+        character_id,
+        "member_of",
+        f"{player_id}{CHARACTERS_GROUP_SUFFIX}",
+        subject_kind=CHARACTER_KIND,
+        subject_meta={"owner": player_id},
+    )
+    return f"{pc_name} is now yours."
 
 
 class DaybidDiscordBot(discord.Client):
@@ -53,6 +84,12 @@ def create_bot() -> DaybidDiscordBot:
     @app_commands.describe(content="What to remember")
     async def remember(interaction: discord.Interaction, content: str) -> None:
         message = await handle_remember(bot.connectome, interaction.user.id, content)
+        await interaction.response.send_message(message, ephemeral=True)
+
+    @bot.tree.command(name="add-character", description="Create a character and claim ownership of it.")
+    @app_commands.describe(pc_name="The character's name")
+    async def add_character(interaction: discord.Interaction, pc_name: str) -> None:
+        message = await handle_add_character(bot.connectome, interaction.user.id, pc_name)
         await interaction.response.send_message(message, ephemeral=True)
 
     return bot
