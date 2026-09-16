@@ -31,8 +31,11 @@ class ConnectomeClient:
     Talks to the Go backend directly over HTTP, independent of daybidmcp - no
     import of the MCP package and no MCP/stdio transport in the path. This
     intentionally re-derives just enough of daybidmcp.server's memory
-    frontmatter format (see format_memory) to write a valid memory; it does
-    not replicate that module's entity-record merge logic.
+    frontmatter format (see format_memory) to write a valid memory.
+    Entity-record merge logic (stub entities, member_of) lives server-side in
+    the Go backend's /entity/relationship endpoint - see assert_relationship -
+    rather than being re-implemented here, so daybidmcp and discordbot share
+    one primitive instead of two drifting Python implementations.
     """
 
     def __init__(
@@ -135,6 +138,26 @@ class ConnectomeClient:
             body["as"] = as_
 
         response = await self._request("POST", "/memory/search", json_body=body)
+        return response.json()
+
+    async def assert_relationship(
+        self,
+        subject_entity_id: str,
+        predicate: str,
+        object_entity_id: str | None = None,
+        kind: str | None = None,
+    ) -> dict[str, object]:
+        """Assert a relationship between two entities via the Go backend's shared
+        merge endpoint, so ent_*.json state (stub entities, member_of) ends up the
+        same as an equivalent daybidmcp.server.remember call would produce - see
+        UpsertEntityRelationship in backend/resources/entity.go."""
+        body: dict[str, object] = {"subjectEntityId": subject_entity_id, "predicate": predicate}
+        if object_entity_id is not None:
+            body["objectEntityId"] = object_entity_id
+        if kind is not None:
+            body["kind"] = kind
+
+        response = await self._request("POST", "/entity/relationship", json_body=body)
         return response.json()
 
     async def get_memory(self, key: str) -> dict[str, object]:

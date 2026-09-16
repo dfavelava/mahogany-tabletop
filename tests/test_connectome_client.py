@@ -131,6 +131,56 @@ async def test_recall_sends_query_and_filters(patch_async_client):
     assert result == {"results": []}
 
 
+async def test_assert_relationship_posts_subject_predicate_object(patch_async_client):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"subject": {"id": "discord-1", "member_of": ["Party A"]}, "object": {"id": "Party A"}},
+        )
+
+    set_handler(patch_async_client, handler)
+
+    client = make_client()
+    result = await client.assert_relationship("discord-1", "member_of", "Party A")
+
+    request = last_request(patch_async_client)
+    assert request.method == "POST"
+    assert str(request.url) == "http://example.test/api/connectome/entity/relationship"
+    assert json.loads(request.content) == {
+        "subjectEntityId": "discord-1",
+        "predicate": "member_of",
+        "objectEntityId": "Party A",
+    }
+    assert result["subject"]["member_of"] == ["Party A"]
+
+
+async def test_assert_relationship_omits_optional_fields_when_not_given(patch_async_client):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"subject": {"id": "discord-1"}})
+
+    set_handler(patch_async_client, handler)
+
+    client = make_client()
+    _ = await client.assert_relationship("discord-1", "is_tired")
+
+    request = last_request(patch_async_client)
+    assert json.loads(request.content) == {"subjectEntityId": "discord-1", "predicate": "is_tired"}
+
+
+async def test_assert_relationship_includes_kind_when_given(patch_async_client):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"subject": {"id": "discord-1"}})
+
+    set_handler(patch_async_client, handler)
+
+    client = make_client()
+    _ = await client.assert_relationship("discord-1", "likes", "tea", kind="rumor")
+
+    request = last_request(patch_async_client)
+    body = json.loads(request.content)
+    assert body["kind"] == "rumor"
+
+
 async def test_get_memory_sends_key_as_query_param(patch_async_client):
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"content": "..."})

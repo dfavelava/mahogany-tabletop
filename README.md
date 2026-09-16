@@ -87,8 +87,13 @@ Covers the routes needed to write and search memory:
 - `GET /api/connectome/memory/?key=...` (`get_memory`)
 - `GET /api/connectome/memory/list` (`browse_all`)
 - `DELETE /api/connectome/memory/` (`forget`)
+- `POST /api/connectome/entity/relationship` (`assert_relationship`)
 
 `remember` writes a plain memory document (content + entity ids); it does not
-replicate `daybidmcp.server`'s entity-record merge logic (`ent_*.json`
-records, `member_of`, relationships). That can be added if/when the bot
-needs it.
+itself replicate `daybidmcp.server`'s entity-record merge logic. Instead,
+`assert_relationship` calls the Go backend's shared `/entity/relationship`
+endpoint (see [issue #51](https://github.com/dfavelava/DaybidDev/issues/51)),
+which upserts stub `ent_*.json` records for the subject/object entities and,
+for the `member_of` predicate, merges the object entity id into the subject's
+`member_of` list - the same state `daybidmcp.server.remember` would produce,
+without re-deriving that logic in Python here.
