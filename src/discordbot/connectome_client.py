@@ -195,6 +195,31 @@ class ConnectomeClient:
         response = await self._request("POST", "/entity/relationship", json_body=body)
         return response.json()
 
+    async def supersede_relationship(
+        self,
+        key: str,
+        subject_entity_id: str,
+        predicate: str,
+        object_entity_id: str | None = None,
+        superseded_by: str | None = None,
+    ) -> dict[str, object]:
+        """Set (or clear) superseded_by on one relationship entry of an existing memory.
+
+        Hits the Go backend's PATCH /memory/relationship route (see
+        supersedeRelationship in backend/resources/memoryResource.go), mirroring
+        daybidmcp.server.supersede_relationship. Pass superseded_by=None to
+        clear a prior supersession and mark the relationship current again.
+        """
+        body: dict[str, object] = {
+            "key": key,
+            "subjectEntityId": subject_entity_id,
+            "predicate": predicate,
+            "objectEntityId": object_entity_id,
+            "superseded_by": superseded_by,
+        }
+        response = await self._request("PATCH", "/memory/relationship", json_body=body)
+        return response.json()
+
     async def get_memory(self, key: str) -> dict[str, object]:
         """Fetch a stored memory document or entity record by key."""
         response = await self._request("GET", "/memory/", params={"key": key})

@@ -11,6 +11,7 @@ from .identity import character_entity_id, discord_entity_id
 CHARACTER_KIND = "character"
 CHARACTERS_GROUP_SUFFIX = "-characters"
 MEMBER_OF_PREDICATE = "member_of"
+PLAYS_PREDICATE = "plays"
 
 _ = load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
@@ -151,6 +152,81 @@ async def handle_join_party(
     return f"{character_name} joined {party_name}."
 
 
+class CurrentCharacterStore:
+    """In-process cache of each player's current "plays" relationship memory key.
+
+    /play-character needs to find and supersede the memory that asserted a
+    player's previous "current" plays relationship, but there's no
+    entity-lookup tool yet (Phase 2) to rediscover it later. So the bot caches
+    it here at write time instead, per #54's design note. This is not
+    persisted across restarts: a player's first /play-character after a
+    restart simply has nothing to supersede, same as their very first one.
+    """
+
+    def __init__(self) -> None:
+        self._current: dict[str, tuple[str, str]] = {}
+
+    def get(self, player_id: str) -> tuple[str, str] | None:
+        """Return (character_id, memory_key) for the player's current character, if any."""
+        return self._current.get(player_id)
+
+    def set(self, player_id: str, character_id: str, memory_key: str) -> None:
+        self._current[player_id] = (character_id, memory_key)
+
+
+async def handle_play_character(
+    connectome: ConnectomeClient,
+    current_characters: CurrentCharacterStore,
+    user_id: int,
+    pc_name: str,
+) -> str:
+    """Set the caller's current active character, superseding any prior one.
+
+    Refuses if the caller doesn't own the named character (created via
+    /add-character, #45). Re-running this for the character that's already
+    current is a harmless no-op, matching /add-character and /join-party.
+    """
+    player_id = discord_entity_id(user_id)
+    character_id = character_entity_id(pc_name)
+
+    character = await connectome.get_entity(character_id)
+    meta = character.get("meta") if character else None
+    owner = meta.get("owner") if isinstance(meta, dict) else None
+    if owner != player_id:
+        return f'You don\'t own a character named "{pc_name}". Create it first with /add-character.'
+
+    previous = current_characters.get(player_id)
+    if previous is not None and previous[0] == character_id:
+        return f"{pc_name} is already your current character."
+
+    result = await connectome.remember(
+        f"{pc_name} is now the current character for {player_id}.",
+        entities=[player_id, character_id],
+        relationships=[
+            {
+                "subjectEntityId": player_id,
+                "predicate": PLAYS_PREDICATE,
+                "objectEntityId": character_id,
+                "kind": "fact",
+            }
+        ],
+    )
+    new_memory_key = result["key"]
+
+    if previous is not None:
+        previous_character_id, previous_memory_key = previous
+        _ = await connectome.supersede_relationship(
+            previous_memory_key,
+            player_id,
+            PLAYS_PREDICATE,
+            previous_character_id,
+            superseded_by=new_memory_key,
+        )
+
+    current_characters.set(player_id, character_id, new_memory_key)
+    return f"You are now playing {pc_name}."
+
+
 async def assign_gm_relationships(connectome: ConnectomeClient, user_ids: list[int]) -> None:
     """Assert a member_of GM relationship for each configured GM user id.
 
@@ -167,6 +243,7 @@ class DaybidDiscordBot(discord.Client):
     def __init__(self, connectome: ConnectomeClient | None = None) -> None:
         super().__init__(intents=discord.Intents.default())
         self.connectome = connectome or ConnectomeClient()
+        self.current_characters = CurrentCharacterStore()
         self.tree = app_commands.CommandTree(self)
 
     async def setup_hook(self) -> None:
@@ -240,6 +317,12 @@ def create_bot() -> DaybidDiscordBot:
     @app_commands.describe(character_name="Your character's name", party_name="The party name to join")
     async def join_party(interaction: discord.Interaction, character_name: str, party_name: str) -> None:
         message = await handle_join_party(bot.connectome, interaction.user.id, character_name, party_name)
+        await interaction.response.send_message(message, ephemeral=True)
+
+    @bot.tree.command(name="play-character", description="Set your current active character.")
+    @app_commands.describe(pc_name="The character's name")
+    async def play_character(interaction: discord.Interaction, pc_name: str) -> None:
+        message = await handle_play_character(bot.connectome, bot.current_characters, interaction.user.id, pc_name)
         await interaction.response.send_message(message, ephemeral=True)
 
     return bot

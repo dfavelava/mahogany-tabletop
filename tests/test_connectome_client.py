@@ -278,6 +278,49 @@ async def test_get_entity_returns_none_when_not_found(patch_async_client):
     assert entity is None
 
 
+async def test_supersede_relationship_sends_patch_with_expected_body(patch_async_client):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"message": "success", "key": "mem_old.md"})
+
+    set_handler(patch_async_client, handler)
+
+    client = make_client()
+    result = await client.supersede_relationship(
+        "mem_old.md", "discord-1", "plays", "thorin", superseded_by="mem_new.md"
+    )
+
+    request = last_request(patch_async_client)
+    assert request.method == "PATCH"
+    assert str(request.url) == "http://example.test/api/connectome/memory/relationship"
+    assert json.loads(request.content) == {
+        "key": "mem_old.md",
+        "subjectEntityId": "discord-1",
+        "predicate": "plays",
+        "objectEntityId": "thorin",
+        "superseded_by": "mem_new.md",
+    }
+    assert result == {"message": "success", "key": "mem_old.md"}
+
+
+async def test_supersede_relationship_omits_optional_fields_when_not_given(patch_async_client):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"message": "success"})
+
+    set_handler(patch_async_client, handler)
+
+    client = make_client()
+    _ = await client.supersede_relationship("mem_old.md", "discord-1", "plays")
+
+    request = last_request(patch_async_client)
+    assert json.loads(request.content) == {
+        "key": "mem_old.md",
+        "subjectEntityId": "discord-1",
+        "predicate": "plays",
+        "objectEntityId": None,
+        "superseded_by": None,
+    }
+
+
 async def test_get_memory_sends_key_as_query_param(patch_async_client):
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"content": "..."})

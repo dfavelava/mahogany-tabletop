@@ -1,5 +1,6 @@
 from discordbot.bot import (
     GM_GROUP_ID,
+    CurrentCharacterStore,
     assign_gm_relationships,
     create_bot,
     get_gm_user_ids,
@@ -7,6 +8,7 @@ from discordbot.bot import (
     handle_gm_note,
     handle_join_party,
     handle_log,
+    handle_play_character,
     handle_relationship_claim,
     handle_remember,
 )
@@ -18,6 +20,7 @@ class FakeConnectomeClient:
     def __init__(self, entities: dict[str, dict[str, object]] | None = None) -> None:
         self.remember_calls: list[dict[str, object]] = []
         self.assert_relationship_calls: list[dict[str, object]] = []
+        self.supersede_relationship_calls: list[dict[str, object]] = []
         self.entities: dict[str, dict[str, object]] = entities or {}
 
     async def remember(
@@ -37,7 +40,26 @@ class FakeConnectomeClient:
                 "acl": acl,
             }
         )
-        return {"key": "mem_test.md"}
+        return {"key": f"mem_test_{len(self.remember_calls)}.md"}
+
+    async def supersede_relationship(
+        self,
+        key: str,
+        subject_entity_id: str,
+        predicate: str,
+        object_entity_id: str | None = None,
+        superseded_by: str | None = None,
+    ) -> dict[str, object]:
+        self.supersede_relationship_calls.append(
+            {
+                "key": key,
+                "subject_entity_id": subject_entity_id,
+                "predicate": predicate,
+                "object_entity_id": object_entity_id,
+                "superseded_by": superseded_by,
+            }
+        )
+        return {"message": "success", "key": key}
 
     async def get_entity(self, entity_id: str) -> dict[str, object] | None:
         return self.entities.get(entity_id)
@@ -241,6 +263,83 @@ async def test_handle_join_party_refuses_when_character_does_not_exist():
     assert "don't own" in message
 
 
+async def test_handle_play_character_sets_current_character_for_owned_character():
+    connectome = FakeConnectomeClient(entities={"thorin": {"meta": {"owner": "discord-123456"}}})
+    current_characters = CurrentCharacterStore()
+
+    message = await handle_play_character(connectome, current_characters, user_id=123456, pc_name="Thorin")
+
+    assert connectome.remember_calls[0]["relationships"] == [
+        {
+            "subjectEntityId": "discord-123456",
+            "predicate": "plays",
+            "objectEntityId": "thorin",
+            "kind": "fact",
+        }
+    ]
+    assert connectome.remember_calls[0]["entities"] == ["discord-123456", "thorin"]
+    assert connectome.supersede_relationship_calls == []
+    assert current_characters.get("discord-123456") == ("thorin", "mem_test_1.md")
+    assert message == "You are now playing Thorin."
+
+
+async def test_handle_play_character_refuses_when_caller_does_not_own_character():
+    connectome = FakeConnectomeClient(entities={"thorin": {"meta": {"owner": "discord-999"}}})
+    current_characters = CurrentCharacterStore()
+
+    message = await handle_play_character(connectome, current_characters, user_id=123456, pc_name="Thorin")
+
+    assert connectome.remember_calls == []
+    assert "don't own" in message
+
+
+async def test_handle_play_character_refuses_when_character_does_not_exist():
+    connectome = FakeConnectomeClient()
+    current_characters = CurrentCharacterStore()
+
+    message = await handle_play_character(connectome, current_characters, user_id=123456, pc_name="Thorin")
+
+    assert connectome.remember_calls == []
+    assert "don't own" in message
+
+
+async def test_handle_play_character_is_a_no_op_when_already_current():
+    connectome = FakeConnectomeClient(entities={"thorin": {"meta": {"owner": "discord-123456"}}})
+    current_characters = CurrentCharacterStore()
+    current_characters.set("discord-123456", "thorin", "mem_existing.md")
+
+    message = await handle_play_character(connectome, current_characters, user_id=123456, pc_name="Thorin")
+
+    assert connectome.remember_calls == []
+    assert connectome.supersede_relationship_calls == []
+    assert message == "Thorin is already your current character."
+
+
+async def test_handle_play_character_supersedes_the_prior_current_character():
+    connectome = FakeConnectomeClient(
+        entities={
+            "thorin": {"meta": {"owner": "discord-123456"}},
+            "balin": {"meta": {"owner": "discord-123456"}},
+        }
+    )
+    current_characters = CurrentCharacterStore()
+    current_characters.set("discord-123456", "thorin", "mem_thorin.md")
+
+    message = await handle_play_character(connectome, current_characters, user_id=123456, pc_name="Balin")
+
+    assert connectome.supersede_relationship_calls == [
+        {
+            "key": "mem_thorin.md",
+            "subject_entity_id": "discord-123456",
+            "predicate": "plays",
+            "object_entity_id": "thorin",
+            "superseded_by": "mem_test_1.md",
+        }
+    ]
+    assert current_characters.get("discord-123456") == ("balin", "mem_test_1.md")
+    assert message == "You are now playing Balin."
+
+
 def test_get_gm_user_ids_parses_comma_separated_list(monkeypatch):
     monkeypatch.setenv("DISCORD_GM_USER_IDS", "111, 222,333")
 
@@ -339,6 +438,15 @@ def test_create_bot_registers_log_command():
 
     assert command is not None
     assert command.name == "log"
+
+
+def test_create_bot_registers_play_character_command():
+    bot = create_bot()
+
+    command = bot.tree.get_command("play-character")
+
+    assert command is not None
+    assert command.name == "play-character"
 
 
 def test_character_entity_id_is_slugified_and_deterministic():
