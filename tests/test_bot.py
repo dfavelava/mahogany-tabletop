@@ -1,3 +1,5 @@
+from connectomeclient import Relationship
+
 from discordbot.bot import (
     GM_GROUP_ID,
     CurrentCharacterStore,
@@ -13,7 +15,6 @@ from discordbot.bot import (
     handle_remember,
     handle_retire_character,
 )
-from discordbot.connectome_client import Relationship
 from discordbot.identity import character_entity_id, discord_entity_id
 
 

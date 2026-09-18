@@ -3,9 +3,10 @@
 Discord bot for a tabletop campaign, backed by the
 [Connectome](https://github.com/dfavelava/connectome) memory service. Built on
 [discord.py](https://discordpy.readthedocs.io/), it talks to Connectome's Go
-backend via `ConnectomeClient`, a minimal async HTTP client that hits the
-backend's `/api/connectome` routes directly (`httpx`, no MCP dependency) - see
-[issue #41](https://github.com/dfavelava/DaybidDev/issues/41).
+backend via [`connectomeclient`](https://github.com/dfavelava/connectome/tree/main/connectomeClient)'s
+`ConnectomeClient`, a minimal async HTTP client that hits the backend's
+`/api/connectome` routes directly (`httpx`, no MCP dependency) - see [issue
+#41](https://github.com/dfavelava/DaybidDev/issues/41).
 
 The bot package is still named `discordbot` internally; only the repo/product
 is MahoganyTableTop.
@@ -61,7 +62,7 @@ Connectome ships its own Python MCP server (`daybidmcp.server`, in the
 [Connectome repo](https://github.com/dfavelava/connectome)), whose tool
 functions could in principle be imported and called in-process, reusing that
 module's `format_memory`/entity-merge logic rather than re-deriving it. This
-package takes the other option instead: a fresh client independent of
+bot depends on `connectomeclient` instead: a fresh client independent of
 `daybidmcp`, hitting `/api/connectome/...` directly. That keeps the bot's
 only dependency on the memory service being the same HTTP API any other
 client would use, rather than an in-process import of the MCP server package
@@ -104,10 +105,15 @@ uv run pytest
 
 ### `ConnectomeClient`
 
-```python
-from discordbot import ConnectomeClient
+`ConnectomeClient` comes from the
+[`connectomeclient`](https://github.com/dfavelava/connectome/tree/main/connectomeClient)
+package (a git dependency on the Connectome repo, not code owned by this
+repo); `discordbot`'s `__init__.py` re-exports it for convenience.
 
-client = ConnectomeClient()
+```python
+from connectomeclient import ConnectomeClient
+
+client = ConnectomeClient(source_type="discord")
 await client.remember("David prefers tea over coffee.", entities=["david"])
 await client.recall("what does david drink")
 ```
