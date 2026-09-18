@@ -1,10 +1,14 @@
-## discordbot
+# MahoganyTableTop
 
-Discord bot for the Daybid connectome memory service, built on
-[discord.py](https://discordpy.readthedocs.io/). It talks to the Go backend
-via `ConnectomeClient`, a minimal async HTTP client that hits the backend's
-`/api/connectome` routes directly (`httpx`, no MCP dependency) - see [issue
-#41](https://github.com/dfavelava/DaybidDev/issues/41).
+Discord bot for a tabletop campaign, backed by the
+[Connectome](https://github.com/dfavelava/connectome) memory service. Built on
+[discord.py](https://discordpy.readthedocs.io/), it talks to Connectome's Go
+backend via `ConnectomeClient`, a minimal async HTTP client that hits the
+backend's `/api/connectome` routes directly (`httpx`, no MCP dependency) - see
+[issue #41](https://github.com/dfavelava/DaybidDev/issues/41).
+
+The bot package is still named `discordbot` internally; only the repo/product
+is MahoganyTableTop.
 
 ### Identity
 
@@ -51,15 +55,18 @@ uv run discordbot
 
 Requires `DISCORD_BOT_TOKEN` (see below) and a reachable Connectome backend.
 
-### Why a standalone HTTP client instead of reusing `daybidmcp.server`
+### Why a standalone HTTP client instead of reusing Connectome's MCP server
 
-`daybidmcp.server`'s tool functions could be imported and called in-process
-instead - same repo, same language, and it would reuse that module's
-`format_memory`/entity-merge logic rather than re-deriving it. This package
-takes the other option instead: a fresh client independent of `daybidmcp`,
-hitting `/api/connectome/...` directly. That keeps the bot's only dependency
-on the memory service being the same HTTP API any other client would use,
-rather than an in-process import of the MCP server package.
+Connectome ships its own Python MCP server (`daybidmcp.server`, in the
+[Connectome repo](https://github.com/dfavelava/connectome)), whose tool
+functions could in principle be imported and called in-process, reusing that
+module's `format_memory`/entity-merge logic rather than re-deriving it. This
+package takes the other option instead: a fresh client independent of
+`daybidmcp`, hitting `/api/connectome/...` directly. That keeps the bot's
+only dependency on the memory service being the same HTTP API any other
+client would use, rather than an in-process import of the MCP server package
+- which also means this bot can live in its own repo, deployed and versioned
+independently of Connectome.
 
 ### Environment
 
@@ -116,14 +123,15 @@ Covers the routes needed to write and search memory:
 - `POST /api/connectome/entity/relationship` (`assert_relationship`)
 
 `remember` writes a plain memory document (content + entity ids); it does not
-itself replicate `daybidmcp.server`'s entity-record merge logic. Instead,
-`assert_relationship` calls the Go backend's shared `/entity/relationship`
-endpoint (see [issue #51](https://github.com/dfavelava/DaybidDev/issues/51)),
-which upserts stub `ent_*.json` records for the subject/object entities,
-for the `member_of` predicate merges the object entity id into the subject's
-`member_of` list, and - when `subject_kind`/`subject_meta` are given - stamps
-those onto the subject entity (overwrite and shallow-merge respectively) -
-the same state `daybidmcp.server.remember` would produce, without
-re-deriving that logic in Python here. `get_entity` reads an `ent_*.json`
-record back (e.g. to check `meta.owner` before deciding whether to write),
-returning `None` if it doesn't exist yet.
+itself replicate Connectome's `daybidmcp.server`'s entity-record merge logic.
+Instead, `assert_relationship` calls the Go backend's shared
+`/entity/relationship` endpoint (see [issue
+#51](https://github.com/dfavelava/DaybidDev/issues/51)), which upserts stub
+`ent_*.json` records for the subject/object entities, for the `member_of`
+predicate merges the object entity id into the subject's `member_of` list,
+and - when `subject_kind`/`subject_meta` are given - stamps those onto the
+subject entity (overwrite and shallow-merge respectively) - the same state
+`daybidmcp.server.remember` would produce, without re-deriving that logic in
+Python here. `get_entity` reads an `ent_*.json` record back (e.g. to check
+`meta.owner` before deciding whether to write), returning `None` if it
+doesn't exist yet.
