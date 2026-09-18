@@ -2,11 +2,15 @@ import os
 from pathlib import Path
 
 import discord
+from connectomeclient import ConnectomeClient, RelationshipKind
 from discord import app_commands
 from dotenv import load_dotenv
 
-from .connectome_client import ConnectomeClient, RelationshipKind
 from .identity import character_entity_id, discord_entity_id
+
+# Passed as ConnectomeClient's source_type so memories this bot writes are
+# tagged "discord" rather than connectomeclient's generic "api" default.
+MEMORY_SOURCE_TYPE = "discord"
 
 CHARACTER_KIND = "character"
 CHARACTERS_GROUP_SUFFIX = "-characters"
@@ -326,7 +330,7 @@ class DaybidDiscordBot(discord.Client):
 
     def __init__(self, connectome: ConnectomeClient | None = None) -> None:
         super().__init__(intents=discord.Intents.default())
-        self.connectome = connectome or ConnectomeClient()
+        self.connectome = connectome or ConnectomeClient(source_type=MEMORY_SOURCE_TYPE)
         self.current_characters = CurrentCharacterStore()
         self.tree = app_commands.CommandTree(self)
 

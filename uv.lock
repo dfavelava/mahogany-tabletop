@@ -201,6 +201,15 @@ wheels = [
 ]
 
 [[package]]
+name = "connectomeclient"
+version = "0.1.0"
+source = { git = "https://github.com/dfavelava/connectome?subdirectory=connectomeClient#fa4d1cdf013418ce6d2bdbc28e68135ee075b70a" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pyyaml" },
+]
+
+[[package]]
 name = "discord-py"
 version = "2.7.1"
 source = { registry = "https://pypi.org/simple" }
@@ -218,10 +227,9 @@ name = "discordbot"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "connectomeclient" },
     { name = "discord-py" },
-    { name = "httpx" },
     { name = "python-dotenv" },
-    { name = "pyyaml" },
 ]
 
 [package.dev-dependencies]
@@ -234,10 +242,9 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "connectomeclient", git = "https://github.com/dfavelava/connectome?subdirectory=connectomeClient" },
     { name = "discord-py", specifier = ">=2.4.0" },
-    { name = "httpx", specifier = ">=0.28.1" },
     { name = "python-dotenv", specifier = ">=1.1.1" },
-    { name = "pyyaml", specifier = ">=6.0.2" },
 ]
 
 [package.metadata.requires-dev]
