@@ -12,6 +12,11 @@ from .identity import character_entity_id, discord_entity_id
 # tagged "discord" rather than connectomeclient's generic "api" default.
 MEMORY_SOURCE_TYPE = "discord"
 
+# Every operation this bot performs is scoped to this tome. Deliberately a
+# constant rather than an env var: there's no configuration under which the
+# bot should read or write anywhere else.
+WEST_MARCHES_TOME = "west-marches"
+
 CHARACTER_KIND = "character"
 CHARACTERS_GROUP_SUFFIX = "-characters"
 MEMBER_OF_PREDICATE = "member_of"
@@ -50,7 +55,7 @@ def get_gm_user_ids() -> list[int]:
 async def handle_remember(connectome: ConnectomeClient, user_id: int, content: str) -> str:
     """Store content as a memory attributed to the calling Discord user and return a confirmation."""
     entity_id = discord_entity_id(user_id)
-    _ = await connectome.remember(content, entities=[entity_id])
+    _ = await connectome.remember(content, entities=[entity_id], tome=WEST_MARCHES_TOME)
     return f"Remembered: {content}"
 
 
@@ -85,14 +90,15 @@ async def handle_relationship_claim(
                 "kind": kind,
             }
         ],
+        tome=WEST_MARCHES_TOME,
     )
-    _ = await connectome.assert_relationship(subject_entity_id, predicate, object_entity_id, kind=kind)
+    _ = await connectome.assert_relationship(subject_entity_id, predicate, object_entity_id, kind=kind, tome=WEST_MARCHES_TOME)
     return f"Recorded {kind}: {subject_entity_id} {predicate} {object_entity_id}."
 
 
 async def handle_gm_note(connectome: ConnectomeClient, content: str) -> str:
     """Store content as a GM-only memory and return a confirmation."""
-    _ = await connectome.remember(content, acl=[GM_GROUP_ID])
+    _ = await connectome.remember(content, acl=[GM_GROUP_ID], tome=WEST_MARCHES_TOME)
     return f"Noted (GM only): {content}"
 
 
@@ -105,7 +111,7 @@ async def handle_log(connectome: ConnectomeClient, content: str) -> str:
     west-marches-overlay preference from #32). acl is omitted so the
     backend's configured DEFAULT_ACL applies, same as /remember.
     """
-    _ = await connectome.remember(content, memory_type="event")
+    _ = await connectome.remember(content, memory_type="event", tome=WEST_MARCHES_TOME)
     return f"Logged: {content}"
 
 
@@ -121,7 +127,7 @@ async def handle_add_character(connectome: ConnectomeClient, user_id: int, pc_na
     player_id = discord_entity_id(user_id)
     character_id = character_entity_id(pc_name)
 
-    existing = await connectome.get_entity(character_id)
+    existing = await connectome.get_entity(character_id, tome=WEST_MARCHES_TOME)
     existing_meta = existing.get("meta") if existing else None
     existing_owner = existing_meta.get("owner") if isinstance(existing_meta, dict) else None
     if existing_owner is not None and existing_owner != player_id:
@@ -133,6 +139,7 @@ async def handle_add_character(connectome: ConnectomeClient, user_id: int, pc_na
         f"{player_id}{CHARACTERS_GROUP_SUFFIX}",
         subject_kind=CHARACTER_KIND,
         subject_meta={"owner": player_id},
+        tome=WEST_MARCHES_TOME,
     )
     return f"{pc_name} is now yours."
 
@@ -151,13 +158,13 @@ async def handle_join_party(
     caller_id = discord_entity_id(user_id)
     character_id = character_entity_id(character_name)
 
-    character = await connectome.get_entity(character_id)
+    character = await connectome.get_entity(character_id, tome=WEST_MARCHES_TOME)
     meta = character.get("meta") if character else None
     owner = meta.get("owner") if isinstance(meta, dict) else None
     if owner != caller_id:
         return f'You don\'t own a character named "{character_name}". Create it first with /add-character.'
 
-    _ = await connectome.assert_relationship(character_id, MEMBER_OF_PREDICATE, party_name)
+    _ = await connectome.assert_relationship(character_id, MEMBER_OF_PREDICATE, party_name, tome=WEST_MARCHES_TOME)
     return f"{character_name} joined {party_name}."
 
 
@@ -205,7 +212,7 @@ async def handle_play_character(
     player_id = discord_entity_id(user_id)
     character_id = character_entity_id(pc_name)
 
-    character = await connectome.get_entity(character_id)
+    character = await connectome.get_entity(character_id, tome=WEST_MARCHES_TOME)
     meta = character.get("meta") if character else None
     owner = meta.get("owner") if isinstance(meta, dict) else None
     if owner != player_id:
@@ -229,6 +236,7 @@ async def handle_play_character(
                 "kind": "fact",
             }
         ],
+        tome=WEST_MARCHES_TOME,
     )
     new_memory_key = result["key"]
 
@@ -240,6 +248,7 @@ async def handle_play_character(
             PLAYS_PREDICATE,
             previous_character_id,
             superseded_by=new_memory_key,
+            tome=WEST_MARCHES_TOME,
         )
 
     current_characters.set(player_id, character_id, new_memory_key)
@@ -272,7 +281,7 @@ async def handle_retire_character(
     player_id = discord_entity_id(user_id)
     character_id = character_entity_id(pc_name)
 
-    character = await connectome.get_entity(character_id)
+    character = await connectome.get_entity(character_id, tome=WEST_MARCHES_TOME)
     meta = character.get("meta") if character else None
     owner = meta.get("owner") if isinstance(meta, dict) else None
     if owner != player_id:
@@ -285,6 +294,7 @@ async def handle_retire_character(
         character_id,
         RETIRED_PREDICATE,
         subject_meta={"status": RETIRED_STATUS},
+        tome=WEST_MARCHES_TOME,
     )
 
     previous = current_characters.get(player_id)
@@ -301,6 +311,7 @@ async def handle_retire_character(
                     "kind": "fact",
                 }
             ],
+            tome=WEST_MARCHES_TOME,
         )
         new_memory_key = result["key"]
         _ = await connectome.supersede_relationship(
@@ -309,6 +320,7 @@ async def handle_retire_character(
             PLAYS_PREDICATE,
             character_id,
             superseded_by=new_memory_key,
+            tome=WEST_MARCHES_TOME,
         )
         current_characters.set(player_id, None, new_memory_key)
 
@@ -322,7 +334,7 @@ async def assign_gm_relationships(connectome: ConnectomeClient, user_ids: list[i
     command - see the module-level note on that env var.
     """
     for user_id in user_ids:
-        _ = await connectome.assert_relationship(discord_entity_id(user_id), MEMBER_OF_PREDICATE, GM_GROUP_ID)
+        _ = await connectome.assert_relationship(discord_entity_id(user_id), MEMBER_OF_PREDICATE, GM_GROUP_ID, tome=WEST_MARCHES_TOME)
 
 
 class DaybidDiscordBot(discord.Client):

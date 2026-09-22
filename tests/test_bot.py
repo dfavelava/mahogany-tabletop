@@ -1,7 +1,9 @@
+import pytest
 from connectomeclient import Relationship
 
 from discordbot.bot import (
     GM_GROUP_ID,
+    WEST_MARCHES_TOME,
     CurrentCharacterStore,
     assign_gm_relationships,
     create_bot,
@@ -18,6 +20,15 @@ from discordbot.bot import (
 from discordbot.identity import character_entity_id, discord_entity_id
 
 
+def require_west_marches(tome: str | None) -> None:
+    """Fail any client call that omits the tome or targets a different one.
+
+    Every FakeConnectomeClient method calls this, so every handler test also
+    verifies the bot never touches a tome other than west-marches.
+    """
+    assert tome == WEST_MARCHES_TOME, f"expected tome {WEST_MARCHES_TOME!r}, got {tome!r}"
+
+
 class FakeConnectomeClient:
     def __init__(self, entities: dict[str, dict[str, object]] | None = None) -> None:
         self.remember_calls: list[dict[str, object]] = []
@@ -32,7 +43,9 @@ class FakeConnectomeClient:
         entities: list[str] | None = None,
         relationships: list[Relationship] | None = None,
         acl: list[str] | None = None,
+        tome: str | None = None,
     ) -> dict[str, str]:
+        require_west_marches(tome)
         self.remember_calls.append(
             {
                 "content": content,
@@ -51,7 +64,9 @@ class FakeConnectomeClient:
         predicate: str,
         object_entity_id: str | None = None,
         superseded_by: str | None = None,
+        tome: str | None = None,
     ) -> dict[str, object]:
+        require_west_marches(tome)
         self.supersede_relationship_calls.append(
             {
                 "key": key,
@@ -63,7 +78,8 @@ class FakeConnectomeClient:
         )
         return {"message": "success", "key": key}
 
-    async def get_entity(self, entity_id: str) -> dict[str, object] | None:
+    async def get_entity(self, entity_id: str, tome: str | None = None) -> dict[str, object] | None:
+        require_west_marches(tome)
         return self.entities.get(entity_id)
 
     async def assert_relationship(
@@ -74,7 +90,9 @@ class FakeConnectomeClient:
         kind: str | None = None,
         subject_kind: str | None = None,
         subject_meta: dict[str, object] | None = None,
+        tome: str | None = None,
     ) -> dict[str, object]:
+        require_west_marches(tome)
         self.assert_relationship_calls.append(
             {
                 "subject_entity_id": subject_entity_id,
@@ -649,3 +667,16 @@ async def test_handle_add_character_allows_the_same_player_to_add_a_second_chara
     assert message == "Balin is now yours."
     assert connectome.entities["thorin"]["meta"] == {"owner": "discord-123456"}
     assert connectome.entities["balin"]["meta"] == {"owner": "discord-123456"}
+
+
+def test_west_marches_tome_id():
+    assert WEST_MARCHES_TOME == "west-marches"
+
+
+async def test_fake_client_rejects_calls_without_the_west_marches_tome():
+    connectome = FakeConnectomeClient()
+
+    with pytest.raises(AssertionError):
+        _ = await connectome.remember("no tome given")
+    with pytest.raises(AssertionError):
+        _ = await connectome.get_entity("thorin", tome="some-other-tome")
