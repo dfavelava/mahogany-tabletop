@@ -203,7 +203,7 @@ wheels = [
 [[package]]
 name = "connectomeclient"
 version = "0.1.0"
-source = { git = "https://github.com/dfavelava/connectome?subdirectory=connectomeClient#fa4d1cdf013418ce6d2bdbc28e68135ee075b70a" }
+source = { git = "https://github.com/dfavelava/connectome?subdirectory=connectomeClient#d9687a9e4b94b02027b86b4319a38bebab7637f9" }
 dependencies = [
     { name = "httpx" },
     { name = "pyyaml" },
