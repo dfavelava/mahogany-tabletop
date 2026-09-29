@@ -46,6 +46,38 @@ def get_gm_user_ids() -> list[int]:
     return [int(piece.strip()) for piece in raw.split(",") if piece.strip()]
 
 
+class LogAsRumorModal(discord.ui.Modal, title="Log as rumor"):
+    """Collects a subject/predicate/object for a rumor sourced from a message.
+
+    Free text rather than #5's autocomplete suggestions: Discord modals only
+    support plain text inputs, not autocomplete.
+    """
+
+    subject = discord.ui.TextInput(label="Subject entity id", max_length=100)
+    predicate = discord.ui.TextInput(label="Predicate", placeholder="e.g. member_of", max_length=100)
+    object_entity_id = discord.ui.TextInput(label="Object entity id", max_length=100)
+
+    def __init__(self, connectome: ConnectomeClient, content: str) -> None:
+        super().__init__()
+        self.connectome = connectome
+        self.content = content
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        message = await handle_relationship_claim(
+            self.connectome,
+            self.content,
+            self.subject.value.strip(),
+            self.predicate.value.strip(),
+            self.object_entity_id.value.strip(),
+            "rumor",
+        )
+        await interaction.response.send_message(message, ephemeral=True)
+
+
+NO_TEXT_REPLY = "That message has no text to save."
+GM_ONLY_REPLY = "Only GMs can save GM notes."
+
+
 class DaybidDiscordBot(discord.Client):
     """Discord client wiring slash commands to the Connectome memory service."""
 
@@ -139,6 +171,33 @@ def create_bot() -> DaybidDiscordBot:
     async def retire_character(interaction: discord.Interaction, pc_name: str) -> None:
         message = await handle_retire_character(bot.connectome, bot.current_characters, interaction.user.id, pc_name)
         await interaction.response.send_message(message, ephemeral=True)
+
+    @bot.tree.context_menu(name="Remember this")
+    async def remember_message(interaction: discord.Interaction, message: discord.Message) -> None:
+        if not message.content:
+            await interaction.response.send_message(NO_TEXT_REPLY, ephemeral=True)
+            return
+        # Attributed to the message's author, not the user who right-clicked.
+        reply = await handle_remember(bot.connectome, message.author.id, message.content)
+        await interaction.response.send_message(reply, ephemeral=True)
+
+    @bot.tree.context_menu(name="Log as rumor")
+    async def rumor_message(interaction: discord.Interaction, message: discord.Message) -> None:
+        if not message.content:
+            await interaction.response.send_message(NO_TEXT_REPLY, ephemeral=True)
+            return
+        await interaction.response.send_modal(LogAsRumorModal(bot.connectome, message.content))
+
+    @bot.tree.context_menu(name="GM note")
+    async def gm_note_message(interaction: discord.Interaction, message: discord.Message) -> None:
+        if interaction.user.id not in get_gm_user_ids():
+            await interaction.response.send_message(GM_ONLY_REPLY, ephemeral=True)
+            return
+        if not message.content:
+            await interaction.response.send_message(NO_TEXT_REPLY, ephemeral=True)
+            return
+        reply = await handle_gm_note(bot.connectome, message.content)
+        await interaction.response.send_message(reply, ephemeral=True)
 
     return bot
 

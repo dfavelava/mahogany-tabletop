@@ -1,3 +1,6 @@
+from types import SimpleNamespace
+
+import discord
 import pytest
 from connectomeclient import Relationship
 
@@ -679,3 +682,94 @@ async def test_fake_client_rejects_calls_without_the_west_marches_tome():
         _ = await connectome.remember("no tome given")
     with pytest.raises(AssertionError):
         _ = await connectome.get_entity("thorin", tome="some-other-tome")
+
+
+class FakeResponse:
+    def __init__(self) -> None:
+        self.sent: list[tuple[str, bool]] = []
+        self.modal: discord.ui.Modal | None = None
+
+    async def send_message(self, content: str, ephemeral: bool = False) -> None:
+        self.sent.append((content, ephemeral))
+
+    async def send_modal(self, modal: discord.ui.Modal) -> None:
+        self.modal = modal
+
+
+def make_interaction(user_id: int) -> SimpleNamespace:
+    return SimpleNamespace(user=SimpleNamespace(id=user_id), response=FakeResponse())
+
+
+def make_message(author_id: int, content: str) -> SimpleNamespace:
+    return SimpleNamespace(author=SimpleNamespace(id=author_id), content=content)
+
+
+def message_command(bot, name: str):
+    command = bot.tree.get_command(name, type=discord.AppCommandType.message)
+    assert command is not None
+    return command
+
+
+async def test_remember_this_attributes_memory_to_message_author():
+    bot = create_bot()
+    bot.connectome = FakeConnectomeClient()
+    interaction = make_interaction(1)
+
+    await message_command(bot, "Remember this").callback(interaction, make_message(2, "The bridge is out"))
+
+    assert bot.connectome.remember_calls[0]["entities"] == [discord_entity_id(2)]
+    assert interaction.response.sent == [("Remembered: The bridge is out", True)]
+
+
+async def test_log_as_rumor_opens_modal_and_records_rumor_on_submit():
+    bot = create_bot()
+    bot.connectome = FakeConnectomeClient()
+    interaction = make_interaction(1)
+
+    await message_command(bot, "Log as rumor").callback(interaction, make_message(2, "Bob serves the duke"))
+    modal = interaction.response.modal
+    assert modal is not None
+    modal.subject._value = "bob"
+    modal.predicate._value = "serves"
+    modal.object_entity_id._value = "duke"
+    submit = make_interaction(1)
+    await modal.on_submit(submit)
+
+    assert bot.connectome.assert_relationship_calls[0]["kind"] == "rumor"
+    assert bot.connectome.remember_calls[0]["content"] == "Bob serves the duke"
+    assert submit.response.sent[0][1] is True
+
+
+async def test_gm_note_rejects_non_gm(monkeypatch):
+    monkeypatch.setenv("DISCORD_GM_USER_IDS", "99")
+    bot = create_bot()
+    bot.connectome = FakeConnectomeClient()
+    interaction = make_interaction(1)
+
+    await message_command(bot, "GM note").callback(interaction, make_message(2, "secret"))
+
+    assert bot.connectome.remember_calls == []
+    assert interaction.response.sent == [("Only GMs can save GM notes.", True)]
+
+
+async def test_gm_note_saves_for_gm(monkeypatch):
+    monkeypatch.setenv("DISCORD_GM_USER_IDS", "99")
+    bot = create_bot()
+    bot.connectome = FakeConnectomeClient()
+    interaction = make_interaction(99)
+
+    await message_command(bot, "GM note").callback(interaction, make_message(2, "secret"))
+
+    assert bot.connectome.remember_calls[0]["acl"] == [GM_GROUP_ID]
+    assert interaction.response.sent == [("Noted (GM only): secret", True)]
+
+
+async def test_message_commands_reply_ephemerally_when_message_has_no_text(monkeypatch):
+    monkeypatch.setenv("DISCORD_GM_USER_IDS", "1")
+    bot = create_bot()
+    bot.connectome = FakeConnectomeClient()
+    for name in ("Remember this", "Log as rumor", "GM note"):
+        interaction = make_interaction(1)
+        await message_command(bot, name).callback(interaction, make_message(2, ""))
+        assert interaction.response.sent == [("That message has no text to save.", True)]
+    assert bot.connectome.remember_calls == []
