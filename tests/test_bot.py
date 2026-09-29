@@ -1,13 +1,12 @@
 import pytest
 from connectomeclient import Relationship
 
-from discordbot.bot import (
+from discordbot.bot import create_bot, get_gm_user_ids
+from discordbot.campaign import (
     GM_GROUP_ID,
     WEST_MARCHES_TOME,
     CurrentCharacterStore,
     assign_gm_relationships,
-    create_bot,
-    get_gm_user_ids,
     handle_add_character,
     handle_gm_note,
     handle_join_party,

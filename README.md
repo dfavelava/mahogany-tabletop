@@ -106,9 +106,9 @@ uv run pytest
 ### The `west-marches` tome
 
 The bot only ever reads and writes the `west-marches` tome (`WEST_MARCHES_TOME`
-in `bot.py`, a constant rather than an env var). `connectomeclient` takes an
+in `campaign.py`, a constant rather than an env var). `connectomeclient` takes an
 optional `tome` on each method rather than on the client, so every call in
-`bot.py` passes `tome=WEST_MARCHES_TOME` explicitly; omitting it would silently
+`campaign.py` passes `tome=WEST_MARCHES_TOME` explicitly; omitting it would silently
 fall through to the default tome. The test suite's `FakeConnectomeClient`
 rejects any call without it, so a new call site that forgets fails tests.
 Data written before this change lives in the default tome and won't be
