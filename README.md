@@ -83,6 +83,8 @@ CONNECTOME_API_KEY=your-api-key
 DISCORD_BOT_TOKEN=your-discord-bot-token
 DISCORD_GUILD_ID=
 DISCORD_GM_USER_IDS=
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=qwen3:4b
 ```
 
 Set `CONNECTOME_API_KEY` to the same value as `apikey` in `backend/.env`.
@@ -95,6 +97,12 @@ Developer Portal](https://discord.com/developers/applications). Set
 `DISCORD_GUILD_ID` to a test server's id to sync slash commands there
 instantly during development; leave it unset in production so commands sync
 globally (which can take up to an hour to propagate).
+
+`OLLAMA_BASE_URL` and `OLLAMA_MODEL` (defaults shown above) configure
+`LLMClient` in [`llm.py`](src/discordbot/llm.py), a thin async `httpx` client
+for Ollama's `/api/chat` with thinking disabled and optional JSON-schema
+output. Ollama is optional: nothing contacts it at startup, and failures raise
+`LLMUnavailable` so callers can degrade.
 
 ### Run the tests
 
