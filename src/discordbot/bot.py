@@ -6,6 +6,7 @@ from connectomeclient import ConnectomeClient
 from discord import app_commands
 from dotenv import load_dotenv
 
+from .ask import handle_ask
 from .campaign import (
     WEST_MARCHES_TOME,
     CurrentCharacterStore,
@@ -20,6 +21,7 @@ from .campaign import (
     handle_retire_character,
 )
 from .entities import EntityIndex
+from .llm import LLMClient
 
 # Passed as ConnectomeClient's source_type so memories this bot writes are
 # tagged "discord" rather than connectomeclient's generic "api" default.
@@ -83,9 +85,12 @@ GM_ONLY_REPLY = "Only GMs can save GM notes."
 class DaybidDiscordBot(discord.Client):
     """Discord client wiring slash commands to the Connectome memory service."""
 
-    def __init__(self, connectome: ConnectomeClient | None = None) -> None:
+    def __init__(self, connectome: ConnectomeClient | None = None, llm: LLMClient | None = None) -> None:
         super().__init__(intents=discord.Intents.default())
         self.connectome = connectome or ConnectomeClient(source_type=MEMORY_SOURCE_TYPE)
+        # Constructing LLMClient makes no network call, so the bot starts
+        # fine while Ollama is down; /ask degrades on LLMUnavailable.
+        self.llm = llm or LLMClient()
         self.current_characters = CurrentCharacterStore()
         self.entity_index = EntityIndex(self.connectome, WEST_MARCHES_TOME)
         self.tree = app_commands.CommandTree(self)
@@ -101,6 +106,10 @@ class DaybidDiscordBot(discord.Client):
             _ = await self.tree.sync(guild=guild)
         else:
             _ = await self.tree.sync()
+
+    async def close(self) -> None:
+        await self.llm.aclose()
+        await super().close()
 
 
 def create_bot() -> DaybidDiscordBot:
@@ -198,6 +207,15 @@ def create_bot() -> DaybidDiscordBot:
         message = await handle_retire_character(bot.connectome, bot.current_characters, interaction.user.id, pc_name)
         bot.entity_index.mark_dirty()
         await interaction.response.send_message(message, ephemeral=True)
+
+    @bot.tree.command(name="ask", description="Ask a question about the campaign.")
+    @app_commands.describe(question="What you want to know")
+    async def ask(interaction: discord.Interaction, question: str) -> None:
+        # Inference can exceed Discord's 3 s interaction deadline, so
+        # acknowledge first and answer via a followup.
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        message = await handle_ask(bot.connectome, bot.llm, interaction.user.id, question)
+        await interaction.followup.send(message, ephemeral=True)
 
     @bot.tree.context_menu(name="Remember this")
     async def remember_message(interaction: discord.Interaction, message: discord.Message) -> None:

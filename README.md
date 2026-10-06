@@ -42,6 +42,16 @@ yet (Phase 2), so a deterministic id needs no separate lookup step.
   scoping reads this membership (one level, no recursion) to decide whether a
   memory whose `acl` names that party is visible to the character's owner.
 
+- `/ask <question>` - answers a campaign question from memory (see
+  [`ask.py`](src/discordbot/ask.py)). It `recall`s the top 10 hydrated
+  memories with `as_` set to the caller's entity id, so a player's answer is
+  built only from memories they can see. GM-only memories never reach their
+  prompt. The model must cite the memories it used, by key, or by session
+  plus timestamp when a memory has a `session`. If it can't, the bot answers
+  "I don't know." If Ollama is unavailable, the reply lists the recalled
+  snippets instead. The reply is ephemeral and deferred, because inference
+  can take longer than Discord's 3 s deadline.
+
 GM visibility is fixed config, not a command: set `DISCORD_GM_USER_IDS` (see
 below) to a comma-separated list of Discord user ids, and the bot asserts a
 `member_of: "GM"` relationship directly on each of their player entities once
