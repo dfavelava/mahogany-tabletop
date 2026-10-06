@@ -15,3 +15,6 @@ __pycache__/
 Thumbs.db
 .idea/
 .vscode/
+
+# Pipeline output (raw session transcripts)
+transcripts/

@@ -114,6 +114,32 @@ for Ollama's `/api/chat` with thinking disabled and optional JSON-schema
 output. Ollama is optional: nothing contacts it at startup, and failures raise
 `LLMUnavailable` so callers can degrade.
 
+### Session pipeline: ingest + transcribe
+
+Craig records one track per speaker, so speaker attribution comes free:
+track → Discord user id → `discord-<id>`. The `mahogany` CLI turns a Craig
+export into speaker-attributed transcript segments:
+
+```bash
+uv sync --extra gpu   # faster-whisper; the bot host doesn't need it
+uv run mahogany ingest craig-export.zip --session S12 --date 2026-09-27
+```
+
+- [`pipeline/ingest.py`](src/discordbot/pipeline/ingest.py) reads the export
+  (a `.zip` or an extracted directory of per-user FLAC/AAC files) and maps
+  each `<n>-<username>.<ext>` track to a Discord user id via the `Tracks:`
+  list in Craig's `info.txt`: by track number, falling back to username.
+  A track it can't map is an error that names the file, never silently dropped.
+- [`pipeline/transcribe.py`](src/discordbot/pipeline/transcribe.py) wraps
+  faster-whisper (default `medium.en`, `compute_type=int8`, VAD on). It
+  transcribes each track separately and emits
+  `Segment(user_id, start, end, text)`, merged across speakers by start time.
+- Output goes to `transcripts/<session>.json` (override with `--out`):
+  `{"session", "date", "segments": [...]}`. Chunking and storing it is #10.
+
+Override the model with `--model`, `--device` (`cuda`/`cpu`/`auto`), and
+`--compute-type`.
+
 ### Run the tests
 
 ```bash

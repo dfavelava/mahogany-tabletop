@@ -1,0 +1,12 @@
+Recording AbCdEfGh1234
+
+Guild:		Mahogany (900000000000000001)
+Channel:	session-vc (900000000000000002)
+Requester:	gm_dave (111111111111111111)
+Start time:	2026-09-27T19:00:00.000Z
+
+Tracks:
+	gm_dave (111111111111111111)
+	bramble#4821 (222222222222222222)
+
+Notes:
