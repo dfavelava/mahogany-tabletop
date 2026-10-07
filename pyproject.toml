@@ -11,10 +11,18 @@ dependencies = [
     "connectomeclient @ git+https://github.com/dfavelava/connectome#subdirectory=connectomeClient",
     "discord-py>=2.4.0",
     "python-dotenv>=1.1.1",
+    "typer>=0.12",
+]
+
+[project.optional-dependencies]
+# Transcription only; the bot host doesn't install this.
+gpu = [
+    "faster-whisper>=1.1",
 ]
 
 [project.scripts]
 discordbot = "discordbot.bot:main"
+mahogany = "discordbot.cli:app"
 
 [build-system]
 requires = ["uv_build>=0.12.5,<0.13.0"]
